@@ -3,16 +3,16 @@
 
 use super::Item;
 
-use std::{collections::BTreeMap, str::from_utf8};
+use std::collections::BTreeMap;
 
 fn encode_int(int: usize) -> Vec<u8> {
     format!("i{}e", int).as_bytes().to_vec()
 }
 
 fn encode_str(str: &[u8]) -> Vec<u8> {
-    format!("{}:{}", str.len(), from_utf8(&str).unwrap())
-        .as_bytes()
-        .to_vec()
+    let mut prefix = format!("{}:", str.len()).as_bytes().to_vec();
+    prefix.extend_from_slice(str);
+    prefix
 }
 
 fn encode_dict(dict: BTreeMap<Vec<u8>, Item>) -> Vec<u8> {
