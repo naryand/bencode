@@ -3,19 +3,19 @@
 
 use super::Item;
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, str::from_utf8};
 
-fn encode_int(int: usize) -> Vec<u8> {
+fn encode_int(int: u64) -> Vec<u8> {
     format!("i{}e", int).as_bytes().to_vec()
 }
 
-fn encode_str(str: &[u8]) -> Vec<u8> {
-    let mut prefix = format!("{}:", str.len()).as_bytes().to_vec();
-    prefix.extend_from_slice(str);
-    prefix
+fn encode_str<'a>(str: &'a [u8]) -> Vec<u8> {
+    format!("{}:{}", str.len(), from_utf8(str).unwrap())
+        .as_bytes()
+        .to_vec()
 }
 
-fn encode_dict(dict: BTreeMap<Vec<u8>, Item>) -> Vec<u8> {
+fn encode_dict<'a>(dict: BTreeMap<&'a [u8], Item<'a>>) -> Vec<u8> {
     let mut encdict: Vec<u8> = vec![b'd'];
     for (key, val) in dict {
         encdict.extend_from_slice(&encode_str(&key));
@@ -30,7 +30,7 @@ fn encode_dict(dict: BTreeMap<Vec<u8>, Item>) -> Vec<u8> {
     encdict
 }
 
-fn encode_list(list: Vec<Item>) -> Vec<u8> {
+fn encode_list<'a>(list: Vec<Item<'a>>) -> Vec<u8> {
     let mut enclist: Vec<u8> = vec![b'l'];
     for item in list {
         match item {
@@ -44,7 +44,7 @@ fn encode_list(list: Vec<Item>) -> Vec<u8> {
     enclist
 }
 
-pub fn encode(tree: Vec<Item>) -> Vec<u8> {
+pub fn encode<'a>(tree: Vec<Item<'a>>) -> Vec<u8> {
     let mut enctree: Vec<u8> = vec![];
     for item in tree {
         match item {
