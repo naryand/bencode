@@ -1,21 +1,25 @@
 /// functionality for decoding bencoded byte strings
-use std::{
-    collections::BTreeMap,
-    fmt::{self, Display},
-};
+use std::fmt::{self, Display};
 
 use nom::{
     branch::alt,
     bytes::complete::{tag, take_until1},
     character::complete::{digit1, u64},
     combinator::{map, map_parser},
-    multi::{length_data, many0},
+    multi::{length_data, many0_count},
     sequence::{delimited, pair, terminated},
     IResult,
 };
-use serde::{Deserialize, de::{self, EnumAccess, IntoDeserializer, VariantAccess}, ser};
+use serde::{
+    de::{self, EnumAccess, IntoDeserializer, VariantAccess},
+    ser, Deserialize,
+};
 
 use crate::Item;
+
+//
+// ------------------------------- NOM -------------------------------
+//
 
 fn int<'a>(i: &'a [u8]) -> IResult<&'a [u8], u64> {
     map_parser(delimited(tag("i"), take_until1("e"), tag("e")), u64)(i)
@@ -25,20 +29,16 @@ fn str<'a>(i: &'a [u8]) -> IResult<&'a [u8], &'a [u8]> {
     length_data(map_parser(terminated(digit1, tag(":")), u64))(i)
 }
 
-fn list<'a>(i: &'a [u8]) -> IResult<&'a [u8], Vec<Item<'a>>> {
-    delimited(tag("l"), many0(item), tag("e"))(i)
+fn list<'a>(i: &'a [u8]) -> IResult<&'a [u8], ()> {
+    delimited(tag("l"), map(many0_count(item), |_| ()), tag("e"))(i)
 }
 
 fn key_val<'a>(i: &'a [u8]) -> IResult<&'a [u8], (&'a [u8], Item<'a>)> {
     pair(str, item)(i)
 }
 
-fn dict<'a>(i: &'a [u8]) -> IResult<&'a [u8], BTreeMap<&'a [u8], Item<'a>>> {
-    delimited(
-        tag("d"),
-        map(many0(key_val), |tuple_vec| tuple_vec.into_iter().collect()),
-        tag("e"),
-    )(i)
+fn dict<'a>(i: &'a [u8]) -> IResult<&'a [u8], ()> {
+    delimited(tag("d"), map(many0_count(key_val), |_| ()), tag("e"))(i)
 }
 
 fn item<'a>(i: &'a [u8]) -> IResult<&'a [u8], Item<'a>> {
@@ -50,9 +50,9 @@ fn item<'a>(i: &'a [u8]) -> IResult<&'a [u8], Item<'a>> {
     ))(i)
 }
 
-pub fn parse<'a>(i: &'a [u8]) -> IResult<&'a [u8], Vec<Item<'a>>> {
-    many0(item)(i)
-}
+//
+// ------------------------------- SERDE -------------------------------
+//
 
 pub struct Deserializer<'de> {
     input: &'de [u8],
@@ -108,7 +108,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     where
         V: serde::de::Visitor<'de>,
     {
-        match self.input[0] {
+        match self.input[self.pos] {
             b'i' => self.deserialize_u64(visitor),
             b'0'..=b'9' => self.deserialize_bytes(visitor),
             b'l' => self.deserialize_seq(visitor),
@@ -179,7 +179,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     {
         let len = self.input.len();
         let res = int(&self.input[self.pos..]).map_err(|e| Error::Message(e.to_string()))?;
-        self.pos = len-res.0.len();
+        self.pos = len - res.0.len();
         visitor.visit_u64(res.1)
     }
 
@@ -224,7 +224,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     {
         let len = self.input.len();
         let res = str(&self.input[self.pos..]).map_err(|e| Error::Message(e.to_string()))?;
-        self.pos = len-res.0.len();
+        self.pos = len - res.0.len();
         visitor.visit_borrowed_bytes(res.1)
     }
 
@@ -284,10 +284,10 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
                         self.pos += 1;
                         Ok(seq)
                     }
-                    _ => Err(Error::Message("seq end de error".to_string()))
+                    _ => Err(Error::Message("seq end de error".to_string())),
                 }
             }
-            _ => Err(Error::Message("seq start de error".to_string()))
+            _ => Err(Error::Message("seq start de error".to_string())),
         }
     }
 
@@ -314,21 +314,19 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     where
         V: serde::de::Visitor<'de>,
     {
-        println!("a {:?}, {}", self.input, self.pos);
         match self.input[self.pos] {
             b'd' => {
                 self.pos += 1;
-                println!("b {:?}, {}", self.input, self.pos);
                 let map = visitor.visit_map(SeqMap::new(&mut self))?;
                 match self.input[self.pos] {
                     b'e' => {
                         self.pos += 1;
                         Ok(map)
                     }
-                    _ => Err(Error::Message("map end de error".to_string()))
+                    _ => Err(Error::Message("map end de error".to_string())),
                 }
             }
-            _ => Err(Error::Message("map start de error".to_string()))
+            _ => Err(Error::Message("map start de error".to_string())),
         }
     }
 
@@ -356,8 +354,9 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         match self.input[self.pos] {
             b'0'..=b'9' => {
                 let len = self.input.len();
-                let res = str(&self.input[self.pos..]).map_err(|e| Error::Message(e.to_string()))?;
-                self.pos = len-res.0.len();
+                let res =
+                    str(&self.input[self.pos..]).map_err(|e| Error::Message(e.to_string()))?;
+                self.pos = len - res.0.len();
                 visitor.visit_enum(std::str::from_utf8(res.1).unwrap().into_deserializer())
             }
             b'd' => {
@@ -368,10 +367,10 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
                         self.pos += 1;
                         Ok(value)
                     }
-                    _ => Err(Error::Message("enum end de error".to_string()))
+                    _ => Err(Error::Message("enum end de error".to_string())),
                 }
             }
-            _ => Err(Error::Message("enum start de error".to_string()))
+            _ => Err(Error::Message("enum start de error".to_string())),
         }
     }
 
@@ -405,8 +404,8 @@ impl<'de, 'a> de::SeqAccess<'de> for SeqMap<'a, 'de> {
 
     fn next_element_seed<T>(&mut self, seed: T) -> Result<Option<T::Value>, Self::Error>
     where
-        T: de::DeserializeSeed<'de> 
-    {   
+        T: de::DeserializeSeed<'de>,
+    {
         match self.de.input[self.de.pos] {
             b'e' => Ok(None),
             _ => seed.deserialize(&mut *self.de).map(Some),
@@ -419,7 +418,7 @@ impl<'de, 'a> de::MapAccess<'de> for SeqMap<'a, 'de> {
 
     fn next_key_seed<K>(&mut self, seed: K) -> Result<Option<K::Value>, Self::Error>
     where
-        K: de::DeserializeSeed<'de> 
+        K: de::DeserializeSeed<'de>,
     {
         match self.de.input[self.de.pos] {
             b'e' => Ok(None),
@@ -429,7 +428,7 @@ impl<'de, 'a> de::MapAccess<'de> for SeqMap<'a, 'de> {
 
     fn next_value_seed<V>(&mut self, seed: V) -> Result<V::Value, Self::Error>
     where
-        V: de::DeserializeSeed<'de> 
+        V: de::DeserializeSeed<'de>,
     {
         seed.deserialize(&mut *self.de)
     }
@@ -451,7 +450,7 @@ impl<'de, 'a> EnumAccess<'de> for Enum<'a, 'de> {
 
     fn variant_seed<V>(self, seed: V) -> Result<(V::Value, Self::Variant), Self::Error>
     where
-        V: de::DeserializeSeed<'de> 
+        V: de::DeserializeSeed<'de>,
     {
         Ok((seed.deserialize(&mut *self.de)?, self))
     }
@@ -466,16 +465,16 @@ impl<'de, 'a> VariantAccess<'de> for Enum<'a, 'de> {
 
     fn newtype_variant_seed<T>(self, seed: T) -> Result<T::Value, Self::Error>
     where
-        T: de::DeserializeSeed<'de> 
+        T: de::DeserializeSeed<'de>,
     {
-        seed.deserialize(self.de)
+        seed.deserialize(&mut *self.de)
     }
 
     fn tuple_variant<V>(self, _len: usize, visitor: V) -> Result<V::Value, Self::Error>
     where
-        V: de::Visitor<'de> 
+        V: de::Visitor<'de>,
     {
-        de::Deserializer::deserialize_seq(self.de, visitor)
+        de::Deserializer::deserialize_seq(&mut *self.de, visitor)
     }
 
     fn struct_variant<V>(
@@ -484,11 +483,15 @@ impl<'de, 'a> VariantAccess<'de> for Enum<'a, 'de> {
         visitor: V,
     ) -> Result<V::Value, Self::Error>
     where
-        V: de::Visitor<'de> 
+        V: de::Visitor<'de>,
     {
-        de::Deserializer::deserialize_map(self.de, visitor)
+        de::Deserializer::deserialize_map(&mut *self.de, visitor)
     }
 }
+
+//
+// ------------------------------- TESTS -------------------------------
+//
 
 #[test]
 fn test1() {
@@ -520,7 +523,7 @@ fn test2() {
         i: u64,
         j: &'a [u8],
     }
-    #[derive(serde::Deserialize, Debug, PartialEq)]
+    #[derive(serde::Deserialize, Debug, PartialEq, Eq)]
     struct X<'a> {
         num: u64,
         #[serde(borrow)]
@@ -531,6 +534,46 @@ fn test2() {
     let y = X {
         num: 1,
         b: C { i: 32, j: b"weee" },
+    };
+
+    assert_eq!(x, y)
+}
+
+#[test]
+fn test3() {
+    #[derive(serde::Deserialize, Debug, PartialEq, Eq)]
+    #[serde(untagged)]
+    enum R<'a> {
+        A { id: &'a [u8] },
+    }
+    #[derive(serde::Deserialize, Debug, PartialEq, Eq)]
+    #[serde(untagged)]
+    enum X<'a> {
+        A {
+            #[serde(borrow)]
+            r: R<'a>,
+            t: &'a [u8],
+            y: &'a [u8],
+        },
+        B {
+            t: &'a [u8],
+            y: &'a [u8],
+            q: &'a [u8],
+            #[serde(borrow)]
+            a: R<'a>,
+        },
+    }
+
+    let data = b"d1:ad2:id20:abcdefghij0123456789e1:q4:ping1:t2:aa1:y1:qe";
+
+    let x = from_bytes::<X>(data).unwrap();
+    let y = X::B {
+        t: b"aa",
+        y: b"q",
+        q: b"ping",
+        a: R::A {
+            id: b"abcdefghij0123456789",
+        },
     };
 
     assert_eq!(x, y)
