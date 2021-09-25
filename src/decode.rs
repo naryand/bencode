@@ -1,21 +1,18 @@
 /// functionality for decoding bencoded byte strings
-use std::fmt::{self, Display};
-
 use nom::{
-    branch::alt,
     bytes::complete::{tag, take_until1},
     character::complete::{digit1, u64},
-    combinator::{map, map_parser},
-    multi::{length_data, many0_count},
-    sequence::{delimited, pair, terminated},
+    combinator::map_parser,
+    multi::length_data,
+    sequence::{delimited,terminated},
     IResult,
 };
 use serde::{
     de::{self, EnumAccess, IntoDeserializer, VariantAccess},
-    ser, Deserialize,
+    Deserialize,
 };
 
-use crate::Item;
+use crate::Error;
 
 //
 // ------------------------------- NOM -------------------------------
@@ -27,27 +24,6 @@ fn int<'a>(i: &'a [u8]) -> IResult<&'a [u8], u64> {
 
 fn str<'a>(i: &'a [u8]) -> IResult<&'a [u8], &'a [u8]> {
     length_data(map_parser(terminated(digit1, tag(":")), u64))(i)
-}
-
-fn list<'a>(i: &'a [u8]) -> IResult<&'a [u8], ()> {
-    delimited(tag("l"), map(many0_count(item), |_| ()), tag("e"))(i)
-}
-
-fn key_val<'a>(i: &'a [u8]) -> IResult<&'a [u8], (&'a [u8], Item<'a>)> {
-    pair(str, item)(i)
-}
-
-fn dict<'a>(i: &'a [u8]) -> IResult<&'a [u8], ()> {
-    delimited(tag("d"), map(many0_count(key_val), |_| ()), tag("e"))(i)
-}
-
-fn item<'a>(i: &'a [u8]) -> IResult<&'a [u8], Item<'a>> {
-    alt((
-        map(int, Item::Int),
-        map(str, Item::String),
-        map(list, Item::List),
-        map(dict, Item::Dict),
-    ))(i)
 }
 
 //
@@ -72,32 +48,6 @@ pub fn from_bytes<'a, T: Deserialize<'a>>(i: &'a [u8]) -> Result<T, Error> {
         Ok(t)
     } else {
         Err(Error::Message("trailing bytes".to_string()))
-    }
-}
-
-#[derive(Debug)]
-pub enum Error {
-    Message(String),
-}
-
-impl Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> fmt::Result {
-        match self {
-            Error::Message(msg) => f.write_str(msg),
-        }
-    }
-}
-
-impl std::error::Error for Error {}
-
-impl ser::Error for Error {
-    fn custom<T: Display>(msg: T) -> Self {
-        Error::Message(msg.to_string())
-    }
-}
-impl de::Error for Error {
-    fn custom<T: Display>(msg: T) -> Self {
-        Error::Message(msg.to_string())
     }
 }
 

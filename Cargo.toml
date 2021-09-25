@@ -8,3 +8,4 @@ edition = "2018"
 [dependencies]
 nom = { version = "7", features = ["alloc"] }
 serde = { version = "1", features = ["derive"] }
+serde_bytes = "0.11"
