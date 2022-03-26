@@ -1,4 +1,4 @@
-use serde::{ser, Serialize};
+use serde::{ser::{self}, Serialize};
 
 use crate::Error;
 
@@ -85,13 +85,13 @@ impl<'a> ser::Serializer for &'a mut Serializer {
     }
 
     fn serialize_none(self) -> Result<Self::Ok, Self::Error> {
-        unimplemented!()
+        Ok(())
     }
-    fn serialize_some<T: ?Sized>(self, _value: &T) -> Result<Self::Ok, Self::Error>
+    fn serialize_some<T: ?Sized>(self, value: &T) -> Result<Self::Ok, Self::Error>
     where
         T: Serialize,
     {
-        unimplemented!()
+        value.serialize(self)
     }
     fn serialize_unit(self) -> Result<Self::Ok, Self::Error> {
         unimplemented!()
@@ -328,6 +328,8 @@ impl<'a> ser::SerializeStructVariant for &'a mut Serializer {
         Ok(())
     }
 }
+
+
 
 #[test]
 fn test1() {

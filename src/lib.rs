@@ -9,12 +9,16 @@ pub mod encode;
 #[derive(Debug)]
 pub enum Error {
     Message(String),
+    Unimplemented,
+    Overflow,
 }
 
 impl Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> fmt::Result {
         match self {
             Error::Message(msg) => f.write_str(msg),
+            Error::Unimplemented => f.write_str("Primitive is unimplemented"),
+            Error::Overflow => f.write_str("Integer overflow"),
         }
     }
 }
